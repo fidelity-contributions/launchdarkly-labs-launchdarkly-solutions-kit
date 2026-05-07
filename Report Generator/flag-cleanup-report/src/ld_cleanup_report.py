@@ -25,13 +25,10 @@ class LaunchDarklyAPI:
     exponential backoff.
 
     Attributes:
-        api_key (str): LaunchDarkly API key for authentication
         base_url (str): Base URL for LaunchDarkly API (https://app.launchdarkly.com/api/v2)
         cache_dir (str): Directory path for storing cache files (default: "cache")
         cache_file (str): Path to the main cache file within cache_dir
         cache_ttl (int): Time-to-live for cached data in hours
-        headers (dict): Standard HTTP headers including authentication
-        beta_headers (dict): Headers for beta API endpoints
 
     Example:
         ```python
@@ -68,20 +65,18 @@ class LaunchDarklyAPI:
             cache_file: Name of main cache file (default: "ldc_cache_data.json")
             cache_ttl: Cache time-to-live in hours (default: 24)
         """
-        self.api_key = api_key
         self.base_url = "https://app.launchdarkly.com/api/v2"
         self.cache_dir = cache_dir
         self.cache_file = os.path.join(self.cache_dir, cache_file)
         self.cache_ttl = cache_ttl
-        self.headers = {
+        self._session = requests.Session()
+        self._session.headers.update({
             "Authorization": api_key,
-            "Content-Type": "application/json"
-        }
-        self.beta_headers = {
-            **self.headers,
-            "LD-API-Version": "beta"
-        }
-        
+            "Content-Type": "application/json",
+        })
+        # In-memory eval cache: project_key → cache dict (avoids repeated file reads per run)
+        self._eval_cache_memory: Dict[str, Dict] = {}
+
         # Create cache directory if it doesn't exist
         os.makedirs(self.cache_dir, exist_ok=True)
 
@@ -128,14 +123,15 @@ class LaunchDarklyAPI:
         """
         delay = initial_delay
         last_exception = None
-        headers = self.beta_headers if use_beta else self.headers
+        extra_headers = {"LD-API-Version": "beta"} if use_beta else {}
 
         for attempt in range(max_retries):
             try:
-                response = requests.get(
+                response = self._session.get(
                     f"{self.base_url}/{endpoint}",
-                    headers=headers,
-                    params=params
+                    headers=extra_headers,
+                    params=params,
+                    timeout=(10, 30),
                 )
                 
                 # Handle rate limiting
@@ -160,7 +156,7 @@ class LaunchDarklyAPI:
 
         raise last_exception
 
-    def get_project_environments(self, project_key: str, limit: int = 20) -> List[dict]:
+    def get_project_environments(self, project_key: str, limit: int = 50) -> List[dict]:
         """
         Fetch environments for a specific project with pagination
         
@@ -249,7 +245,7 @@ class LaunchDarklyAPI:
         
         return all_environments
 
-    def get_all_projects(self, tags: Optional[List[str]] = None, limit: int = 20) -> List[dict]:
+    def get_all_projects(self, tags: Optional[List[str]] = None, limit: int = 50) -> List[dict]:
         """
         Fetch all projects from LaunchDarkly API with optional tag filtering
         
@@ -292,129 +288,104 @@ class LaunchDarklyAPI:
 
             return projects
             
-        except Exception as e:
+        except (RequestException, OSError) as e:
             print(f"\nError fetching projects: {e}")
             return []
 
-    def get_feature_flags(self, project_key: str, limit: int = 20) -> List[dict]:
+    def get_feature_flags(self, project_key: str, limit: int = 50) -> List[dict]:
         """
-        Fetch all feature flags for a project with pagination
-        
+        Fetch all feature flags for a project with pagination.
+
         Uses LaunchDarkly's pagination pattern and includes a progress bar.
-        Fetches detailed flag data for each flag in the list.
-        
+        The list endpoint returns the same FeatureFlag object as the individual
+        flag endpoint, so no per-flag detail requests are needed.
+
         Args:
             project_key: Project identifier
             limit: Number of items per page (default: 50)
-        
+
         Returns:
-            List[dict]: List of detailed flag dictionaries
-            
+            List[dict]: List of flag dictionaries
+
         Note:
             - Shows progress bar during fetch
             - Handles partial results if errors occur
-            - Fetches detailed data for each flag
             - Follows pagination links automatically
         """
         all_flags = []
         progress = tqdm(desc=f"Fetching flags for {project_key}", unit="flags", leave=False)
-        
+
         try:
-            # Build initial URL with filter and limit
             params = {"limit": limit}
-            next_page = f"flags/{project_key}"  # Initial endpoint
+            next_page = f"flags/{project_key}"
             while next_page:
                 try:
                     response = self._make_request_with_backoff(next_page, params)
                     flags = response.get("items", [])
-                    
+
                     if not flags:
                         break
-                    
-                    # Process each flag
-                    for flag in flags:
-                        try:
-                            flag_detail = self._make_request_with_backoff(
-                                f"flags/{project_key}/{flag['key']}"
-                            )
-                            all_flags.append(flag_detail)
-                        except RequestException as e:
-                            print(f"\nError fetching details for flag {flag['key']}: {e}")
-                            # Add basic flag data if detailed fetch fails
-                            all_flags.append(flag)
-                    
-                    # Update progress
+
+                    all_flags.extend(flags)
+
                     progress.total = response.get("totalCount", 0)
                     progress.n = len(all_flags)
                     progress.refresh()
-                    
-                    next_page = self._nextPage(response)
 
+                    next_page = self._nextPage(response)
                     params = {}
-                        
+
                 except RequestException as e:
                     print(f"\nError fetching flags page for project {project_key}: {e}")
-                    if not all_flags:  # If we haven't fetched any flags yet
+                    if not all_flags:
                         raise
                     print("Returning partially fetched flags.")
                     break
-                    
+
         except RequestException as e:
             print(f"Error fetching flags for project {project_key}: {e}")
             return []
         finally:
             progress.close()
-        
+
         return all_flags
-    def get_flag_statuses_by_environment(self, project_key: str, environment_key: str, limit: int = 20) -> Dict[str, dict]:
+    def get_flag_statuses_by_environment(self, project_key: str, environment_key: str, limit: int = 50) -> Dict[str, dict]:
         """
-        Fetch status of all flags in a specific environment
-        
+        Fetch status of all flags in a specific environment.
+
         Args:
             project_key: Project identifier
             environment_key: Environment key
-            limit: Number of items per page (max 50)
-        
+            limit: Number of items per page (default: 50)
+
         Returns:
             Dictionary mapping flag keys to their status
         """
         status_map = {}
-        offset = 0
-        
+        next_page = f"flag-statuses/{project_key}/{environment_key}"
+        params: Dict = {"limit": limit}
+
         try:
-            while True:
-                params = {
-                    "limit": limit,
-                    "offset": offset
-                }
-                
-                response = self._make_request_with_backoff(
-                    f"flag-statuses/{project_key}/{environment_key}",
-                    params=params
-                )
-                
+            while next_page:
+                response = self._make_request_with_backoff(next_page, params)
+
                 statuses = response.get("items", [])
                 if not statuses:
                     break
-                    
+
                 for status in statuses:
-                    
-                    # Extract flag key from the parent link
                     flag_key = status["_links"]["parent"]["href"].split("/")[-1]
-                    
                     status_map[flag_key] = {
                         "lastRequested": status.get("lastRequested"),
-                        "status": status["name"]
+                        "status": status["name"],
                     }
-                
-                offset += len(statuses)
-                total = response.get("totalCount", 0)
-                if offset >= total:
-                    break
-                    
+
+                next_page = self._nextPage(response)
+                params = {}
+
         except RequestException as e:
             print(f"\nError fetching flag statuses for {project_key}/{environment_key}: {e}")
-        
+
         return status_map
 
     def _fetch_project_data(self, project: dict) -> dict:
@@ -489,7 +460,8 @@ class LaunchDarklyAPI:
             return self._fetch_project_data(project)
             
         except RequestException as e:
-            if e.response and e.response.status_code == 404:
+            resp = getattr(e, "response", None)
+            if resp is not None and resp.status_code == 404:
                 return None
             raise
 
@@ -550,13 +522,28 @@ class LaunchDarklyAPI:
 
             return data
             
-        except Exception as e:
+        except (RequestException, ValueError, OSError) as e:
             print(f"\nError fetching data: {e}")
             return None
 
     def _get_eval_cache_path(self, project_key: str) -> str:
         """Get the path for the evaluation metrics cache file"""
         return os.path.join(self.cache_dir, f"ldc_cache_eval_{project_key}.json")
+
+    def _get_or_load_eval_cache(self, project_key: str) -> Dict:
+        """Return the in-memory eval cache for a project, loading from disk on first access.
+
+        Keeps a single in-memory copy per project for the lifetime of this instance so that
+        get_flag_evaluations doesn't have to re-read the JSON file on every call.
+        """
+        if project_key not in self._eval_cache_memory:
+            loaded = self.load_cached_data(self._get_eval_cache_path(project_key))
+            self._eval_cache_memory[project_key] = loaded or {
+                "fetch_date": datetime.now().isoformat(),
+                "cache_ttl": self.cache_ttl,
+                "evaluations": {},
+            }
+        return self._eval_cache_memory[project_key]
          
     def load_cached_data(self, cache_path: Optional[str] = None) -> Optional[Dict]:
         """
@@ -601,8 +588,8 @@ class LaunchDarklyAPI:
             if cache_age.total_seconds() < (self.cache_ttl * 3600):
                 return cache
             
-        except Exception as e:
-            print(f"Error loading evaluation cache: {e}")
+        except (ValueError, OSError, KeyError) as e:
+            print(f"Error loading cache: {e}")
         
         
         return None   
@@ -615,7 +602,7 @@ class LaunchDarklyAPI:
         try:
             with open(cache_path, 'w') as f:
                 json.dump(data, f, indent=2)
-        except Exception as e:
+        except OSError as e:
             print(f"Error saving evaluation cache: {e}")
 
     def _filter_projects_by_tags(self, projects: List[dict], tags: List[str]) -> List[dict]:
@@ -643,68 +630,202 @@ class LaunchDarklyAPI:
                 filtered_projects.append(project)
         return filtered_projects
     
-    def get_flag_evaluations(self, project_key: str, environment_key: str, flag_key: str, 
-                        days: int = 30, start_date: Optional[datetime] = None, 
+    def get_flag_evaluations(self, project_key: str, environment_key: str, flag_key: str,
+                        days: int = 30, start_date: Optional[datetime] = None,
                         timezone: str = "UTC", force_refresh: bool = False) -> Optional[int]:
         """
         Get total flag evaluations for a specific time period.
         """
         try:
-            # Try to get from cache first
+            cache_key = f"{environment_key}:{flag_key}:{days}:{start_date.isoformat() if start_date else 'now'}"
+
             if not force_refresh:
-                cache = self.load_cached_data(self._get_eval_cache_path(project_key))
-                if cache:
-                    cache_key = f"{environment_key}:{flag_key}:{days}:{start_date.isoformat() if start_date else 'now'}"
-                    if cache_key in cache["evaluations"]:
-                        return cache["evaluations"][cache_key]
-            
-            # Calculate timestamps
+                mem_cache = self._get_or_load_eval_cache(project_key)
+                if cache_key in mem_cache.get("evaluations", {}):
+                    return mem_cache["evaluations"][cache_key]
+
             end_date = start_date or datetime.now()
             from_date = end_date - timedelta(days=days)
-            
-            # Convert to millisecond timestamps
+
             from_ts = int(from_date.timestamp() * 1000)
-            to_ts = int((end_date + timedelta(days=1)).timestamp() * 1000)  # Include full end date
-            
-            # print(f"\nFetching evaluations for {flag_key} in {environment_key} days: {days}")
-            # print(f"From: {from_date.isoformat()} ({from_ts})")
-            # print(f"To: {end_date.isoformat()} ({to_ts})")
-            
+            to_ts = int((end_date + timedelta(days=1)).timestamp() * 1000)
+
             params = {
-                'from': str(from_ts),
-                'to': str(to_ts),
-                'tz': timezone
+                "from": str(from_ts),
+                "to": str(to_ts),
+                "tz": timezone,
             }
 
             response = self._make_request_with_backoff(
                 f"usage/evaluations/{project_key}/{environment_key}/{flag_key}",
                 params=params,
-                use_beta=True
+                use_beta=True,
             )
-            
-            if response and 'totalEvaluations' in response:
-                total = response['totalEvaluations']
-                # print(f"Total evaluations: {total}")
-                
-                # Update cache
-                cache = self.load_cached_data(self._get_eval_cache_path(project_key)) or {
-                    "fetch_date": datetime.now().isoformat(),
-                    "cache_ttl": self.cache_ttl,
-                    "evaluations": {}
-                }
-                
-                cache_key = f"{environment_key}:{flag_key}:{days}:{start_date.isoformat() if start_date else 'now'}"
-                cache["evaluations"][cache_key] = total
-                self._save_eval_cache(project_key, cache)
-                
+
+            if response and "totalEvaluations" in response:
+                total = response["totalEvaluations"]
+
+                mem_cache = self._get_or_load_eval_cache(project_key)
+                mem_cache["evaluations"][cache_key] = total
+                self._save_eval_cache(project_key, mem_cache)
+
                 return total
-                
+
             print("No evaluation data in response")
             return None
-            
-        except Exception as e:
+
+        except (RequestException, OSError) as e:
             print(f"\nError fetching evaluations for flag {flag_key}: {e}")
             return None
+
+    def get_sdk_versions_details(self, project_keys: List[str],
+                                  force_refresh: bool = False) -> Dict[str, List[dict]]:
+        """
+        Fetch SDK name and version data for a list of projects.
+
+        Uses GET /api/v2/usage/service-connections?projectKey=X&groupBy=sdkName&groupBy=sdkVersion
+        (beta) which returns the distinct SDK name+version combinations that have connected to
+        each project.  One request is made per project.  The response metadata field contains
+        the distinct SDK combinations; the series data is ignored.
+
+        When multiple versions of the same SDK are present, only the lexicographically largest
+        version string is kept per SDK name (approximates the most recent version).
+
+        Args:
+            project_keys: List of project keys to fetch SDK data for.
+            force_refresh: Bypass cache and fetch fresh data.
+
+        Returns:
+            Dict keyed by project_key → list of {sdk, version} dicts (one entry per distinct
+            SDK name, using the max observed version).
+            Example: {"my-project": [{"sdk": "JavaClient", "version": "7.13.4"}]}
+
+        Note:
+            - Requires beta API header (LD-API-Version: beta)
+            - Data is scoped to project level; all environments in a project share the same values
+            - Cached to ldc_cache_sdk_versions.json
+        """
+        cache_path = os.path.join(self.cache_dir, "ldc_cache_sdk_versions.json")
+
+        if not force_refresh:
+            cached = self.load_cached_data(cache_path)
+            if cached:
+                return cached.get("sdk_index", {})
+
+        sdk_index: Dict[str, Dict[str, str]] = {}  # project_key → {sdk_name → max_version}
+
+        for project_key in project_keys:
+            try:
+                response = self._make_request_with_backoff(
+                    "usage/service-connections",
+                    params={"projectKey": project_key, "groupBy": ["sdkName", "sdkVersion"]},
+                    use_beta=True
+                )
+            except (RequestException, OSError) as e:
+                print(f"\nWarning: Could not fetch service connections for {project_key}: {e}")
+                continue
+
+            best: Dict[str, str] = {}
+            for entry in response.get("metadata", []):
+                sdk_name = entry.get("sdkName", "")
+                sdk_version = entry.get("sdkVersion", "")
+                if not sdk_name:
+                    continue
+                # Keep the lexicographically largest version string as a proxy for most recent
+                if sdk_name not in best or sdk_version > best[sdk_name]:
+                    best[sdk_name] = sdk_version
+
+            if best:
+                sdk_index[project_key] = [{"sdk": k, "version": v} for k, v in sorted(best.items())]
+
+        result: Dict[str, List[dict]] = sdk_index
+
+        cache_data = {
+            "fetch_date": datetime.now().isoformat(),
+            "cache_ttl": self.cache_ttl,
+            "sdk_index": result,
+        }
+        try:
+            with open(cache_path, "w") as f:
+                json.dump(cache_data, f, indent=2)
+        except OSError as e:
+            print(f"Warning: Could not save SDK versions cache: {e}")
+
+        return result
+
+    def get_applications_flag_index(self, force_refresh: bool = False) -> Dict[str, List[str]]:
+        """
+        Fetch all applications (beta) and build an inverted index from flag key → app keys.
+
+        Uses GET /api/v2/applications?expand=flags to retrieve each application and the
+        list of flags it has evaluated, then inverts that mapping.
+
+        Args:
+            force_refresh: Bypass cache and fetch fresh data
+
+        Returns:
+            Dict mapping flag_key → sorted list of application keys that have evaluated it.
+            Example: {"my-flag": ["billing-service", "com.company.app"]}
+
+        Note:
+            - Applications are an account-level concept (not project-scoped)
+            - The flag list under each application contains only flag key and name,
+              with no project context — the same key in multiple projects will match
+            - Requires beta API header (LD-API-Version: beta)
+            - Cached to ldc_cache_applications.json
+        """
+        cache_path = os.path.join(self.cache_dir, "ldc_cache_applications.json")
+
+        if not force_refresh:
+            cached = self.load_cached_data(cache_path)
+            if cached:
+                return cached.get("flag_index", {})
+
+        flag_index: Dict[str, List[str]] = {}
+        next_page = "applications"
+        params = {"expand": "flags", "limit": 20}
+
+        try:
+            while next_page:
+                try:
+                    response = self._make_request_with_backoff(next_page, params, use_beta=True)
+                except (RequestException, OSError) as e:
+                    print(f"\nWarning: Could not fetch applications page: {e}")
+                    break
+
+                for app in response.get("items", []):
+                    app_key = app.get("key", "")
+                    if not app_key:
+                        continue
+                    flags_data = app.get("flags", {})
+                    for flag_item in flags_data.get("items", []):
+                        flag_key = flag_item.get("key", "")
+                        if flag_key:
+                            flag_index.setdefault(flag_key, [])
+                            if app_key not in flag_index[flag_key]:
+                                flag_index[flag_key].append(app_key)
+
+                next_page = self._nextPage(response)
+                params = {}
+
+        except (RequestException, OSError) as e:
+            print(f"\nWarning: Could not fetch applications: {e}")
+
+        for fk in flag_index:
+            flag_index[fk].sort()
+
+        cache_data = {
+            "fetch_date": datetime.now().isoformat(),
+            "cache_ttl": self.cache_ttl,
+            "flag_index": flag_index,
+        }
+        try:
+            with open(cache_path, "w") as f:
+                json.dump(cache_data, f, indent=2)
+        except OSError as e:
+            print(f"Warning: Could not save applications cache: {e}")
+
+        return flag_index
 
     def purge_eval_cache(self, project_key: Optional[str] = None):
         """
@@ -731,7 +852,7 @@ class LaunchDarklyAPI:
                         try:
                             if os.path.isfile(file_path):
                                 os.remove(file_path)
-                        except Exception as e:
+                        except OSError as e:
                             print(f"Error removing {file_path}: {e}")
             
             # Ensure cache directory exists
@@ -768,29 +889,20 @@ class LaunchDarklyAPI:
             '60_day_evals': None,
             '30_day_evals': None,
             '14_day_evals': None,
-            '7_day_evals': None
+            '7_day_evals': None,
         }
-        
-        today = datetime.now()
-        
-        # Get evaluations for each time period
+
         for days in [60, 30, 14, 7]:
             count = self.get_flag_evaluations(
                 project_key,
                 environment_key,
                 flag_key,
                 days=days,
-                start_date=None,  # Use current date
-                force_refresh=force_refresh
+                start_date=None,
+                force_refresh=force_refresh,
             )
             metrics[f'{days}_day_evals'] = count or 0
-        
-        # print(f"\nMetrics for {flag_key} in {environment_key}:")
-        # print(f"Last 60 days: {metrics['60_day_evals']}")
-        # print(f"Last 30 days: {metrics['30_day_evals']}")
-        # print(f"Last 14 days: {metrics['14_day_evals']}")
-        # print(f"Last 7 days: {metrics['7_day_evals']}")
-        
+
         return metrics
 
 def parse_args():
@@ -843,7 +955,10 @@ def parse_args():
                       help="Generate flag details report for all flags in project and environments. Can be used with --project_key for a single project, or without for all projects.")
     parser.add_argument("--exclude-projects", action="append",
                       help="Exclude specific project keys when running flag-details on all projects. Can be specified multiple times.")
-    
+    parser.add_argument("--include-sdk-app-info", action="store_true",
+                      help="When used with --flag-details, adds SDK_Names, SDK_Versions, and Application_IDs columns "
+                           "using the LaunchDarkly beta Applications and SDK usage APIs.")
+
     args = parser.parse_args()
     isInvalidArgs = False
 
@@ -971,10 +1086,6 @@ def list_projects(ld_api: LaunchDarklyAPI, data: Optional[dict] = None) -> List[
     print("-" * charCount)
     
     for i, project in enumerate(projects, 1):
-        # Get most recent flag evaluation across all flags and environments
-        most_recent = None
-     
-
         # Find most recent flag evaluation across all flags and environments
         last_requested_dates = []
         for flag in project["flags"]:
@@ -1106,13 +1217,14 @@ def generate_environment_report(data: dict, output_file: str, project_key: Optio
         writer.writerows(rows)
     print(f"Environment report generated: {output_file}")
     print(f"Total environments: {len(rows)}")
-def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDarklyAPI, 
+def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDarklyAPI,
                           project_key: Optional[str] = None, force_refresh: bool = False,
-                          exclude_projects: Optional[List[str]] = None):
+                          exclude_projects: Optional[List[str]] = None,
+                          include_sdk_app_info: bool = False):
     """
     Generate CSV report with detailed flag information for one or more projects.
     Each row represents one flag in one environment.
-    
+
     Args:
         data: Project and flag data from LaunchDarkly
         output_file: Path to output CSV file
@@ -1120,12 +1232,16 @@ def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDar
         project_key: Optional specific project to analyze. If None, analyzes all projects.
         force_refresh: Whether to bypass cache
         exclude_projects: Optional list of project keys to exclude from the report
+        include_sdk_app_info: When True, adds SDK_Names, SDK_Versions, and Application_IDs
+            columns using the beta usage/sdk-versions/details and applications APIs.
+            SDK data is scoped to the project+environment level (same value for all flags
+            in the same environment). Application IDs are account-level and may match
+            flags with the same key across multiple projects.
     """
-    # Generate timestamp in Unix epoch format (milliseconds)
     report_timestamp = int(time.time() * 1000)
-    
+
     headers = [
-        'Primary_Key',  # <project-key>_<environment-key>_<flag-key>
+        'Primary_Key',
         'Project_Name',
         'Project_Key',
         'Project_Tags',
@@ -1136,8 +1252,8 @@ def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDar
         'Maintainer',
         'Creation_Date',
         'Days_Since_Creation',
-        'Flag_State',  # On/Off
-        'Flag_Status',  # active/inactive/launched
+        'Flag_State',
+        'Flag_Status',
         'Archived',
         'Last_Requested',
         'Days_Since_Last_Eval',
@@ -1148,16 +1264,42 @@ def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDar
         '30_Day_Evals',
         '14_Day_Evals',
         '7_Day_Evals',
-        'Report_Generated_Timestamp'
     ]
+
+    if include_sdk_app_info:
+        headers += ['SDK_Names', 'SDK_Versions', 'Application_IDs']
+
+    headers.append('Report_Generated_Timestamp')
+
+    sdk_index: Dict[str, List[dict]] = {}
+    app_flag_index: Dict[str, List[str]] = {}
+
+    if include_sdk_app_info:
+        # Determine which projects will be processed so we only fetch SDK data for those
+        if project_key:
+            target = next((p for p in data["projects"] if p["key"] == project_key), None)
+            sdk_project_keys = [target["key"]] if target else []
+        else:
+            sdk_project_keys = [
+                p["key"] for p in data["projects"]
+                if not exclude_projects or p["key"] not in exclude_projects
+            ]
+        print(f"Fetching SDK connection data (beta) for {len(sdk_project_keys)} project(s)...")
+        sdk_index = ld_api.get_sdk_versions_details(
+            project_keys=sdk_project_keys,
+            force_refresh=force_refresh
+        )
+        print(f"  SDK data loaded for {len(sdk_index)} project(s).")
+        print("Fetching application → flag index (beta)...")
+        app_flag_index = ld_api.get_applications_flag_index(force_refresh=force_refresh)
+        print(f"  Application index loaded: {len(app_flag_index)} flag key(s) mapped to applications.")
+
     today = datetime.now()
     with open(output_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(headers)
-        
-        # Determine which projects to process
+
         if project_key:
-            # Single project mode
             target_project = next(
                 (p for p in data["projects"] if p["key"] == project_key),
                 None
@@ -1166,14 +1308,13 @@ def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDar
                 raise ValueError(f"Project '{project_key}' not found")
             projects = [target_project]
         else:
-            # All projects mode, with optional exclusions
             projects = data["projects"]
             if exclude_projects:
                 projects = [p for p in projects if p["key"] not in exclude_projects]
                 print(f"Excluding {len(data['projects']) - len(projects)} project(s): {', '.join(exclude_projects)}")
-        
+
         total_rows = sum(
-            len(project["flags"]) * len(project["environments"]) 
+            len(project["flags"]) * len(project["environments"])
             for project in projects
         )
         progress = tqdm(total=total_rows, desc="Generating flag details report", unit="rows")
@@ -1192,15 +1333,16 @@ def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDar
                     archived = "Yes" if env_data.get("archived") else "No"
                     last_req = env_data.get("lastRequested")
                     if last_req is not None:
+                        last_req_dt = _to_datetime_format(last_req)
                         days_ago = _day_ago_from_today(last_req)
-                        days_since_eval = (today - _to_datetime_format(last_req)).days if _to_datetime_format(last_req) else ""
+                        days_since_eval = (today - last_req_dt).days if last_req_dt else ""
                     else:
                         last_req = "Never"
                         days_ago = "Never"
                         days_since_eval = ""
                     metrics = ld_api._fetch_flag_evaluation_metrics(
-                        project["key"], 
-                        env_key, 
+                        project["key"],
+                        env_key,
                         flag["key"],
                         force_refresh=force_refresh
                     )
@@ -1228,10 +1370,18 @@ def generate_flag_details_report(data: dict, output_file: str, ld_api: LaunchDar
                         metrics.get('30_day_evals', 0),
                         metrics.get('14_day_evals', 0),
                         metrics.get('7_day_evals', 0),
-                        report_timestamp
                     ]
+
+                    if include_sdk_app_info:
+                        sdk_entries = sdk_index.get(project["key"], [])
+                        sdk_names = ", ".join(e["sdk"] for e in sdk_entries) or ""
+                        sdk_versions = ", ".join(e["version"] for e in sdk_entries) or ""
+                        app_ids = ", ".join(app_flag_index.get(flag["key"], [])) or ""
+                        row += [sdk_names, sdk_versions, app_ids]
+
+                    row.append(report_timestamp)
                     writer.writerow(row)
-                    progress.update(1)  # Update progress bar
+                    progress.update(1)
         progress.close()
     print(f"\nFlag details report generated successfully: {output_file}")
     print(f"Total rows: {total_rows}")
@@ -1517,7 +1667,9 @@ def log_command_execution(args: argparse.Namespace, log_file: str = "command_exe
         options.append("flag_details=True")
     if args.exclude_projects:
         options.append(f"exclude_projects={','.join(args.exclude_projects)}")
-    
+    if args.include_sdk_app_info:
+        options.append("include_sdk_app_info=True")
+
     options_str = "; ".join(options) if options else "none"
     
     # Check if log file exists to determine if we need to write header
@@ -1553,7 +1705,13 @@ def main() -> int:
     """
     try:
         args = parse_args()
-        
+
+        # Resolve file paths to absolute paths to prevent path traversal surprises
+        if args.output:
+            args.output = str(Path(args.output).resolve())
+        if args.cache_dir:
+            args.cache_dir = str(Path(args.cache_dir).resolve())
+
         # Log command execution
         log_command_execution(args)
         
@@ -1640,7 +1798,8 @@ def main() -> int:
                 ld_api,
                 args.project_key,
                 force_refresh=args.force_refresh,
-                exclude_projects=args.exclude_projects
+                exclude_projects=args.exclude_projects,
+                include_sdk_app_info=args.include_sdk_app_info
             )
             return 0
         

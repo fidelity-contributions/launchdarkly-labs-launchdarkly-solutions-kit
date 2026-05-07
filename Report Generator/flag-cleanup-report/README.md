@@ -10,18 +10,17 @@ A tool that complements LaunchDarkly's [Launch Insights](https://docs.launchdark
 ### Recommended Workflow
 
 1. Use **Launch Insights** for:
-   - Interactive flag analysis
-   - Custom date range visualization
-   - Real-time monitoring
-   - Individual flag deep-dives
-   - Team collaboration
-
+  - Interactive flag analysis
+  - Custom date range visualization
+  - Real-time monitoring
+  - Individual flag deep-dives
+  - Team collaboration
 2. Use this **Cleanup Report Tool** for:
-   - Bulk cleanup initiatives
-   - Multi-project comparisons
-   - Automated reporting
-   - Offline analysis
-   - Data exports for custom processing
+  - Bulk cleanup initiatives
+  - Multi-project comparisons
+  - Automated reporting
+  - Offline analysis
+  - Data exports for custom processing
 
 ## Features
 
@@ -30,43 +29,39 @@ A tool that complements LaunchDarkly's [Launch Insights](https://docs.launchdark
 - Track flag evaluation metrics across environments
 - Detailed CSV reports for flag analysis
 
-
-
 ## Reports
+
 ### CSV Report
-![img](./img/csv-report.png)
+
 The CSV report provides a comprehensive analysis of your feature flags, helping identify cleanup opportunities and track flag usage patterns.
 
 It offers three views:
 
-1. Organization View:  Using `--all-projects` :
-    - Project details (name, key, tags)
-    - Flag details (name, key, maintainer)
-    - Creation and modification dates
-    - Environment status and last evaluation dates
-    - Flag metadata (temporary status, tags, kind)
-
-2. Project View: Using `--project_key (-p)`:
-    - Flag evaluation metrics per environment
-    - 7, 14, 30, 60 day total evaluation count
-    - includes everything in organization view
-3. Flag Details View: Using `--flag-details`:
-    - One row per flag per environment
-    - Primary key for each flag/environment combination
-    - Environment-specific flag state and status
-    - Detailed evaluation metrics per environment
-    - Last evaluation timestamps and days since last eval
-    - Can be used with `--project_key` for a single project or without for all projects
-    - Use `--exclude-projects` to skip specific projects when analyzing all projects
-    - Ideal for per-environment analysis and database imports
-
-
-
+1. **Organization View** — Using `--all-projects`:
+  - Project details (name, key, tags)
+  - Flag details (name, key, maintainer)
+  - Creation and modification dates
+  - Environment status and last evaluation dates
+  - Flag metadata (temporary status, tags, kind)
+2. **Project View** — Using `--project_key (-p)`:
+  - Flag evaluation metrics per environment
+  - 7, 14, 30, 60 day total evaluation count
+  - Includes everything in organization view
+3. **Flag Details View** — Using `--flag-details`:
+  - One row per flag per environment
+  - Primary key for each flag/environment combination
+  - Environment-specific flag state and status
+  - Detailed evaluation metrics per environment (always included, even for all-projects runs)
+  - Last evaluation timestamps and days since last eval
+  - Can be used with `--project_key` for a single project or without for all projects
+  - Use `--exclude-projects` to skip specific projects when analyzing all projects
+  - Ideal for per-environment analysis and database imports
 
 ### Console Report
-![img](./img/list-projects.png)
+
 The console report is generated using the `--list-projects` command and displays data in an easy-to-read table format, making it simple to scan multiple projects at once.
 This report helps identify:
+
 - Inactive projects with no recent flag evaluations
 - Projects with a high number of flags that may need cleanup
 - Project tag organization and coverage
@@ -80,25 +75,21 @@ The console report provides a quick overview of all LaunchDarkly projects with k
 - Days since last flag evaluation
 - Environment names
 
-
-
-
-
 ## Prerequisites
 
 Before using this tool, you need to create a LaunchDarkly API access token with read-only permissions:
 
 1. Create an access token by following the instructions at [Creating API Access Tokens](https://docs.launchdarkly.com/home/account/api-create)
-
 2. For permissions, you can either:
-   - Use the built-in "Reader" role (recommended for most users)
-   - Create a custom role with restricted project access (see [Scoping API Tokens](https://docs.launchdarkly.com/home/account/api/?q=reader+access+token#scope-personal-api-access-tokens))
+  - Use the built-in "Reader" role (recommended for most users)
+  - Create a custom role with restricted project access (see [Scoping API Tokens](https://docs.launchdarkly.com/home/account/api/?q=reader+access+token#scope-personal-api-access-tokens))
 
 > **Important**: Store your access token securely. It cannot be viewed again after creation.
 
 ## Quick Start
 
 1. Clone and setup:
+
 ```bash
 git clone <repository-url>
 cd ld-cleanup-report
@@ -107,6 +98,7 @@ chmod +x setup.sh
 ```
 
 2. Set your LaunchDarkly API Access Token:
+
 ```bash
 # Option 1: Export as environment variable
 export LAUNCHDARKLY_API_KEY='your-api-key-here'
@@ -115,71 +107,84 @@ export LAUNCHDARKLY_API_KEY='your-api-key-here'
 cp .env.example .env
 # Edit .env and add your API key
 ```
+
 3. Activate your virtual environment:
+
 ```bash
 source venv/bin/activate
 ```
 
-3. Run in interactive mode:
+4. Run in interactive mode:
+
 ```bash
 ld-cleanup-report
 ```
+
 or run in command line mode:
+
 ```bash
 ld-cleanup-report --all-projects --output flag_cleanup_report.csv
-``` 
+```
 
-4. Deactivate your virtual environment:
+5. Deactivate your virtual environment:
+
 ```bash
 deactivate
 ```
 
 ## Generating Evaluation Metrics
 
-To generate evaluation metrics for a single project, use the `--project_key` option:
-```bash
-# this will create a cache of the project and its flags evaluation metrics
-ld-cleanup-report --project_key demo-project 
-``` 
-> Note: To improve performance, evaluation metrics are not included in multi-project reports.
+To generate evaluation metrics for a single project using the cleanup report, use the `--project_key` option:
 
+```bash
+# Creates a CSV with per-environment evaluation counts for every flag
+ld-cleanup-report --project_key demo-project
+```
+
+> **Note:** Evaluation metrics are **not** included in the multi-project cleanup report (`--all-projects`) to keep run times manageable. The `--flag-details` report always includes evaluation metrics regardless of whether a single project or all projects are selected.
 
 ## Usage
 
 ### Interactive Mode (Default)
+
 When run without arguments, the tool operates in interactive mode:
+
 ```bash
 ld-cleanup-report
 ```
 
 Interactive mode will:
+
 1. Display a list of all available projects with:
-   - Project name and key
-   - Project tags
-   - Number of flags
-   - Days since last flag evaluation
-   - Environment names
+  - Project name and key
+  - Project tags
+  - Number of flags
+  - Days since last flag evaluation
+  - Environment names
 2. Prompt for project selection:
-   - Enter a number to select a specific project
-   - Enter 'a' to analyze all projects
-   - Enter 'q' to quit
+  - Enter a number to select a specific project
+  - Enter 'a' to analyze all projects
+  - Enter 'q' to quit
 
 ### Command Line Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--force-refresh` | Ignore cache and fetch fresh data | False |
-| `--output`, `-o` | Path for the output CSV file | flag_cleanup_report.csv |
-| `--cache-ttl` | Cache lifetime in hours | 24 |
-| `--cache-dir` | Directory to store cache files | cache |
-| `--project_key`, `-p` | Specific project to analyze (includes evaluation metrics) | None |
-| `--flag-details` | Generate detailed flag report (one row per flag per environment). Use with `--project_key` for a single project or alone for all projects | None |
-| `--exclude-projects` | Exclude specific project keys when running `--flag-details` on all projects. Can be specified multiple times | None |
-| `--tag`, `-t` | Filter by project tag(s). Can be specified multiple times | None |
-| `--list-projects` | List available projects | False |
-| `--list-tags` | List available project tags | False |
-| `--all-projects` | Analyze all projects | False |
-| `--environment-report` | Generate environment configuration report | False |
+
+| Option                 | Description                                                                                                                               | Default                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `--force-refresh`      | Ignore cache and fetch fresh data                                                                                                         | False                   |
+| `--output`, `-o`       | Path for the output CSV file (resolved to an absolute path)                                                                               | flag_cleanup_report.csv |
+| `--cache-ttl`          | Cache lifetime in hours                                                                                                                   | 24                      |
+| `--cache-dir`          | Directory to store cache files (resolved to an absolute path)                                                                             | cache                   |
+| `--project_key`, `-p`  | Specific project to analyze (includes evaluation metrics)                                                                                 | None                    |
+| `--flag-details`          | Generate detailed flag report (one row per flag per environment). Use with `--project_key` for a single project or alone for all projects | None                    |
+| `--exclude-projects`      | Exclude specific project keys when running `--flag-details` on all projects. Can be specified multiple times                              | None                    |
+| `--include-sdk-app-info`  | Add `SDK_Names`, `SDK_Versions`, and `Application_IDs` columns to the `--flag-details` report using LaunchDarkly beta APIs               | False                   |
+| `--tag`, `-t`             | Filter by project tag(s). Can be specified multiple times                                                                                 | None                    |
+| `--list-projects`         | List available projects                                                                                                                   | False                   |
+| `--list-tags`             | List available project tags                                                                                                               | False                   |
+| `--all-projects`          | Analyze all projects                                                                                                                      | False                   |
+| `--environment-report`    | Generate environment configuration report                                                                                                 | False                   |
+
 
 > Must include either `--all-projects`, `--list-projects`, `--project_key`, or `--flag-details` for command line mode.
 
@@ -188,64 +193,66 @@ Interactive mode will:
 The `--tag` option can be used to filter projects in several ways:
 
 1. With `--all-projects`:
-   ```bash
+  ```bash
    # Generate report for all projects with the 'production' tag
    ld-cleanup-report --all-projects --tag production
 
    # Generate report for projects with either 'production' OR 'critical' tags
    ld-cleanup-report --all-projects --tag production --tag critical
-   ```
-
+  ```
 2. With `--list-projects`:
-   ```bash
+  ```bash
    # List only projects with specific tag
    ld-cleanup-report --list-projects --tag demo
 
    # List projects with either tag (OR condition)
    ld-cleanup-report --list-projects --tag demo --tag managed-by-terraform
-   ```
+  ```
 
-When using multiple tags, they are treated as an OR condition - projects that have any of the specified tags will be included in the report or listing.
+When using multiple tags, they are treated as an OR condition — projects that have any of the specified tags will be included in the report or listing.
 
 > Note: Tag filtering is applied whether using cached data or fetching fresh data with `--force-refresh`
 
 ### Flag Evaluation Metrics
 
-When analyzing a single project using `--project_key` or `-p`, the report includes evaluation metrics for recent time periods:
+When analyzing a single project using `--project_key` or `-p`, the cleanup report includes evaluation metrics for recent time periods. The `--flag-details` report includes these metrics for every project.
 
-| Time Period | Description | Metric Name|
-|-------------|-------------|-------------|
-| Last 60 days | Shows long-term usage patterns | 60_day_evals |
+
+| Time Period  | Description                       | Metric Name  |
+| ------------ | --------------------------------- | ------------ |
+| Last 60 days | Shows long-term usage patterns    | 60_day_evals |
 | Last 30 days | Aligns with monthly review cycles | 30_day_evals |
-| Last 14 days | Helps identify bi-weekly trends | 14_day_evals |
-| Last 7 days | Shows very recent activity | 7_day_evals |
+| Last 14 days | Helps identify bi-weekly trends   | 14_day_evals |
+| Last 7 days  | Shows very recent activity        | 7_day_evals  |
 
 
 These metrics help identify flag usage, below are example patterns:
-| Pattern | Time Period | Evaluations | Trend | Notes |
-|---------|-------------|-------------|-------|--------|
-| **Growing Usage** | 60 days | 1000 | +20% per period | Steady base of usage |
-| | 30 days | 800 | +30% per period | Increased monthly activity |
-| | 14 days | 500 | +40% per period | Recent growth |
-| | 7 days | 300 | +50% per period | Very active currently |
-| **Stable Usage** | 60 days | 1000 | ±5% variation | Consistent long-term usage |
-| | 30 days | 500 | ±5% variation | Expected monthly rate |
-| | 14 days | 250 | ±5% variation | Normal bi-weekly activity |
-| | 7 days | 125 | ±5% variation | Typical weekly usage |
-| **Declining Usage** | 60 days | 1000 | -40% per period | Historical usage |
-| | 30 days | 200 | -50% per period | Significant drop |
-| | 14 days | 50 | -60% per period | Very low recent usage |
-| | 7 days | 10 | -70% per period | Minimal current activity |
-| **Abandoned Flag** | 60 days | 100 | -100% drop | Some historical usage |
-| | 30 days | 0 | No activity | No recent usage |
-| | 14 days | 0 | No activity | No activity |
-| | 7 days | 0 | No activity | Completely inactive |
 
 
+| Pattern             | Time Period | Evaluations | Trend           | Notes                      |
+| ------------------- | ----------- | ----------- | --------------- | -------------------------- |
+| **Growing Usage**   | 60 days     | 1000        | +20% per period | Steady base of usage       |
+|                     | 30 days     | 800         | +30% per period | Increased monthly activity |
+|                     | 14 days     | 500         | +40% per period | Recent growth              |
+|                     | 7 days      | 300         | +50% per period | Very active currently      |
+| **Stable Usage**    | 60 days     | 1000        | ±5% variation   | Consistent long-term usage |
+|                     | 30 days     | 500         | ±5% variation   | Expected monthly rate      |
+|                     | 14 days     | 250         | ±5% variation   | Normal bi-weekly activity  |
+|                     | 7 days      | 125         | ±5% variation   | Typical weekly usage       |
+| **Declining Usage** | 60 days     | 1000        | -40% per period | Historical usage           |
+|                     | 30 days     | 200         | -50% per period | Significant drop           |
+|                     | 14 days     | 50          | -60% per period | Very low recent usage      |
+|                     | 7 days      | 10          | -70% per period | Minimal current activity   |
+| **Abandoned Flag**  | 60 days     | 100         | -100% drop      | Some historical usage      |
+|                     | 30 days     | 0           | No activity     | No recent usage            |
+|                     | 14 days     | 0           | No activity     | No activity                |
+|                     | 7 days      | 0           | No activity     | Completely inactive        |
 
-> Note: These metrics are not included in multi-project reports to maintain performance.
+
+> Note: In the standard cleanup report (`--all-projects`), evaluation metrics are omitted to maintain performance. Use `--flag-details` if you need per-environment eval counts across all projects.
 
 #### Examples
+
 ```bash
 # Generate report with evaluation metrics for specific project
 ld-cleanup-report --project_key demo-project
@@ -253,8 +260,11 @@ ld-cleanup-report --project_key demo-project
 # Generate detailed flag report for a single project
 ld-cleanup-report --flag-details --project_key sample-js-demo
 
-# Generate detailed flag report for all projects
-ld-cleanup-report --flag-details
+# Generate detailed flag report with SDK names, SDK versions, and application IDs (beta APIs)
+ld-cleanup-report --flag-details --project_key sample-js-demo --include-sdk-app-info
+
+# Generate detailed flag report for all projects with SDK/app info
+ld-cleanup-report --flag-details --include-sdk-app-info
 
 # Generate detailed flag report for all projects excluding some
 ld-cleanup-report --flag-details --exclude-projects legacy-project --exclude-projects test-project
@@ -271,8 +281,11 @@ ld-cleanup-report --tag demo --tag java --all-projects
 # List projects with either tag
 ld-cleanup-report --list-projects --tag demo --tag managed-by-terraform
 ```
+
 ### Flag Details Report
+
 The `--flag-details` option generates a detailed CSV report where each row represents one flag in one environment. This format is ideal for:
+
 - Per-environment analysis
 - Database imports with unique primary keys
 - Filtering and querying specific flag/environment combinations
@@ -281,6 +294,7 @@ The `--flag-details` option generates a detailed CSV report where each row repre
 **Usage Options:**
 
 1. **Single Project** (with `--project_key`):
+
 ```bash
 # Generate flag details for a specific project
 ld-cleanup-report --flag-details --project_key your-project-key
@@ -288,6 +302,7 @@ ld-cleanup-report --flag-details --project_key your-project-key
 ```
 
 2. **All Projects** (without `--project_key`):
+
 ```bash
 # Generate flag details for all projects
 ld-cleanup-report --flag-details
@@ -295,6 +310,7 @@ ld-cleanup-report --flag-details
 ```
 
 3. **All Projects with Exclusions**:
+
 ```bash
 # Generate flag details for all projects except specified ones
 ld-cleanup-report --flag-details --exclude-projects legacy-proj --exclude-projects test-proj
@@ -302,6 +318,7 @@ ld-cleanup-report --flag-details --exclude-projects legacy-proj --exclude-projec
 ```
 
 4. **With Tag Filtering**:
+
 ```bash
 # Generate flag details for projects with specific tags
 ld-cleanup-report --flag-details --tag production
@@ -309,6 +326,7 @@ ld-cleanup-report --flag-details --tag production
 ```
 
 **Report Columns:**
+
 - `Primary_Key` - Unique identifier: `<project-key>_<environment-key>_<flag-key>`
 - `Project_Name`, `Project_Key`, `Project_Tags` - Project information
 - `Environment_Key`, `Environment_Name` - Environment identifiers
@@ -324,7 +342,21 @@ ld-cleanup-report --flag-details --tag production
 - `Flag_Tags` - Tags applied to the flag
 - `Kind` - Flag type (boolean/multivariate)
 - `60_Day_Evals`, `30_Day_Evals`, `14_Day_Evals`, `7_Day_Evals` - Evaluation counts for this environment
+
+When `--include-sdk-app-info` is also provided, three additional columns are appended:
+
+- `SDK_Names` - Comma-separated SDK names that have connected to this project (e.g. `JavaClient,NodeJSClient`)
+- `SDK_Versions` - Comma-separated max observed versions per SDK, in the same order as `SDK_Names` (e.g. `7.13.4,9.10.9`)
+- `Application_IDs` - Comma-separated application keys (registered in LaunchDarkly) that have evaluated this flag (e.g. `com.company.app,billing-service`)
+
+> **Note on data granularity and limitations:**
+> - `SDK_Names` and `SDK_Versions` are scoped to the **project level** (not per-environment). All flags and all environments within the same project share the same SDK values — there is no per-flag or per-environment SDK data available from the LaunchDarkly API.
+> - When multiple versions of the same SDK are observed, only the highest version string is reported.
+> - `Application_IDs` is an **account-level** mapping. If the same flag key exists in multiple projects, all applications that evaluated that key (in any project) will be included.
+> - Both columns rely on **beta API endpoints** (`LD-API-Version: beta`). Beta APIs may change without notice.
+
 **Example Output:**
+
 ```csv
 Primary_Key,Project_Name,Project_Key,Environment_Key,Environment_Name,Flag_Key,Flag_State,7_Day_Evals
 sample-js-demo_development_my-flag,Sample JS Demo,sample-js-demo,development,Development,my-flag,On,1234
@@ -333,41 +365,56 @@ another-project_development_feature-x,Another Project,another-project,developmen
 ```
 
 **Performance Note:** When running `--flag-details` on all projects, the tool fetches evaluation metrics for every flag in every environment across all projects. This can be time-consuming for organizations with many projects. Consider using:
+
 - `--exclude-projects` to skip projects that don't need analysis
 - `--tag` to filter only relevant projects
 - `--cache-ttl` with a longer duration to reduce repeated API calls
 
 ## Cache Management
 
-
 The cache directory (default: `cache/`) contains
+
 ```
 cache/
-  ├── ldc_cache_data.json           # Main project data cache
-  ├── ldc_cache_eval_proj1.json     # Evaluation metrics for project 1
-  ├── ldc_cache_eval_proj2.json     # Evaluation metrics for project 2
+  ├── ldc_cache_data.json              # Main project data cache
+  ├── ldc_cache_eval_proj1.json        # Evaluation metrics for project 1
+  ├── ldc_cache_eval_proj2.json        # Evaluation metrics for project 2
+  ├── ldc_cache_sdk_versions.json      # SDK name/version data (created by --include-sdk-app-info)
+  ├── ldc_cache_applications.json      # Application → flag index (created by --include-sdk-app-info)
   └── ...
 ```
 
 All cache files:
+
 - Use the `ldc_cache_` prefix
 - End with `.json` extension
 - Are automatically managed by the tool
 - Can be cleared using `--force-refresh`
 
-The tool maintains two types of caches to reduce API calls:
-1. Project Data Cache (`ldc_cache_data.json`):
-   - Contains project, environment, and flag data
-   - Shared across all operations
-   - TTL configurable with `--cache-ttl`
+The tool maintains four types of caches to reduce API calls:
 
+1. Project Data Cache (`ldc_cache_data.json`):
+  - Contains project, environment, and flag data
+  - Shared across all operations
+  - TTL configurable with `--cache-ttl`
 2. Evaluation Metrics Cache (`ldc_cache_eval_<project_key>.json`):
-   - Created per project when using `--project_key`
-   - Contains flag evaluation metrics for 7/14/30/60 days
-   - Uses same TTL as project data cache
-   - Automatically created and updated
+  - Created per project whenever evaluation metrics are fetched (e.g. `--project_key` or `--flag-details`)
+  - Contains flag evaluation metrics for 7/14/30/60 days
+  - Loaded into memory once per run; individual entries are written back to disk as they are fetched
+  - Uses same TTL as project data cache
+3. SDK Versions Cache (`ldc_cache_sdk_versions.json`):
+  - Created when using `--include-sdk-app-info`
+  - Contains SDK name and max-version data per project, sourced from the LaunchDarkly beta service-connections API
+  - One entry per project; all environments within a project share the same SDK data
+  - Uses same TTL as project data cache
+4. Applications Cache (`ldc_cache_applications.json`):
+  - Created when using `--include-sdk-app-info`
+  - Contains an inverted index mapping flag keys to the application keys that have evaluated them
+  - Account-wide; sourced from the LaunchDarkly beta Applications API
+  - Uses same TTL as project data cache
 
 ### Cache TTL Configuration
+
 ```bash
 # Use default 24-hour TTL for all caches
 ld-cleanup-report
@@ -383,14 +430,18 @@ ld-cleanup-report --project_key demo-project --force-refresh
 ```
 
 ### Cache Invalidation
+
 Caches are refreshed when:
+
 - Cache age exceeds TTL
 - TTL value changes
 - `--force-refresh` is used
 - Cache file is missing/corrupted
 
 ### Project Data Cache Schema
+
 The main cache file (`ldc_cache_data.json`) uses the following schema:
+
 ```json
 {
     "fetch_date": "2024-03-14T15:30:00.000Z",  // ISO timestamp of last fetch
@@ -430,41 +481,49 @@ The main cache file (`ldc_cache_data.json`) uses the following schema:
 ```
 
 ### Evaluation Metrics Cache Schema
+
 The evaluation cache files (`ldc_cache_eval_<project_key>.json`) use the following schema:
+
 ```json
 {
     "fetch_date": "2024-03-14T15:30:00.000Z",  // ISO timestamp of last fetch
     "cache_ttl": 24,                           // Cache TTL in hours
     "evaluations": {                           // Map of evaluation metrics
-        "env_key:flag_key:days": int           // Total evaluations for time period
+        "env_key:flag_key:days:now": int       // Total evaluations for time period
     }
 }
 ```
 
 Each evaluation cache file:
+
 - Is specific to a single project
 - Stores metrics for all flags in that project
 - Uses the same TTL as the main cache
-- Is automatically created when using `--project_key`
+- Is created whenever evaluation metrics are fetched (e.g. `--project_key` or `--flag-details`)
 - Is stored in the configured cache directory (default: `cache/`)
+- Is loaded once per run into memory to avoid repeated disk reads across the 4 time periods per flag
 
-The cache key format (`env_key:flag_key:days`):
-- Combines environment key, flag key, and time period
-- Allows efficient lookup of metrics
+The cache key format (`env_key:flag_key:days:now_or_date`):
 
+- Combines environment key, flag key, time period (days), and reference date
+- `now` is used when no explicit start date is specified (the typical case)
+- Allows efficient lookup of metrics without re-reading the file on every call
 
 ## Command Execution Logging
 
 The tool automatically logs all command executions to `command_execution_log.csv` in the current directory. This provides an audit trail of all report generation activities.
 
 ### Log Format
+
 The log file is in CSV format with the following columns:
+
 1. **Timestamp_Human_Readable** - Human-readable timestamp (YYYY-MM-DD HH:MM:SS)
 2. **Timestamp_Milliseconds** - Unix epoch timestamp in milliseconds
 3. **Command** - The type of command executed (e.g., `cleanup_report`, `flag_details_report`, `list_projects`)
 4. **Options** - Semicolon-separated list of options/parameters used
 
 ### Example Log Entries
+
 ```csv
 Timestamp_Human_Readable,Timestamp_Milliseconds,Command,Options
 2024-11-19 10:30:45,1700395845000,cleanup_report,project_key=demo-project; force_refresh=True
@@ -474,7 +533,9 @@ Timestamp_Human_Readable,Timestamp_Milliseconds,Command,Options
 ```
 
 ### Logged Commands
+
 The following command types are logged:
+
 - `cleanup_report` - Standard flag cleanup report
 - `flag_details_report` - Detailed flag report with evaluation metrics
 - `environment_report` - Environment configuration report
@@ -482,7 +543,9 @@ The following command types are logged:
 - `list_tags` - Tag listing operation
 
 ### Logged Options
+
 The following options are captured when present:
+
 - `project_key` - Specific project analyzed
 - `tags` - Project tag filters applied
 - `all_projects` - Whether all projects were analyzed
@@ -493,13 +556,13 @@ The following options are captured when present:
 - `flag_details` - Flag details project key
 
 ### Notes
+
 - The log file is automatically created on first run
 - Logging failures do not interrupt normal operation (warnings are displayed)
 - The log file is excluded from git via `.gitignore` (matches `*.csv` pattern)
 - Timestamps are captured at the start of command execution
 
-
-
 ## Contributing & License
+
 We welcome contributions! Please feel free to submit a PR or open an issue to suggest improvements or new features.
 This project is licensed under the MIT License. See the LICENSE file for details.
